@@ -263,7 +263,7 @@ def generate_html(market_data, wti_data, news_items, today_str):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>株式ブリーフィング {today_str}</title>
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ background: #11111b; color: #cdd6f4; font-family: -apple-system, sans-serif; padding: 12px; }}

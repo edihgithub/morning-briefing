@@ -191,21 +191,18 @@ def generate_html(market_data, wti_data, news_items, today_str):
   <script>
     (function(){{
       var chart = LightweightCharts.createChart(document.getElementById('{chart_id}'), {{
-        width: 0, height: 200,
+        autoSize: true, height: 200,
         layout: {{ background: {{ color: '#1e1e2e' }}, textColor: '#cdd6f4' }},
         grid: {{ vertLines: {{ color: '#313244' }}, horzLines: {{ color: '#313244' }} }},
         timeScale: {{ borderColor: '#45475a' }},
       }});
-      chart.timeScale().fitContent();
       var series = chart.addCandlestickSeries({{
         upColor:'#26a69a', downColor:'#ef5350',
         borderUpColor:'#26a69a', borderDownColor:'#ef5350',
         wickUpColor:'#26a69a', wickDownColor:'#ef5350',
       }});
       series.setData({chart_json});
-      new ResizeObserver(function(){{
-        chart.applyOptions({{width: document.getElementById('{chart_id}').clientWidth}});
-      }}).observe(document.getElementById('{chart_id}'));
+      chart.timeScale().fitContent();
     }})();
   </script>
 </div>"""
@@ -229,21 +226,18 @@ def generate_html(market_data, wti_data, news_items, today_str):
   <script>
     (function(){{
       var chart = LightweightCharts.createChart(document.getElementById('wti_chart'), {{
-        width: 0, height: 200,
+        autoSize: true, height: 200,
         layout: {{ background: {{ color: '#1e1e2e' }}, textColor: '#cdd6f4' }},
         grid: {{ vertLines: {{ color: '#313244' }}, horzLines: {{ color: '#313244' }} }},
         timeScale: {{ borderColor: '#45475a' }},
       }});
-      chart.timeScale().fitContent();
       var series = chart.addCandlestickSeries({{
         upColor:'#26a69a', downColor:'#ef5350',
         borderUpColor:'#26a69a', borderDownColor:'#ef5350',
         wickUpColor:'#26a69a', wickDownColor:'#ef5350',
       }});
       series.setData({chart_json});
-      new ResizeObserver(function(){{
-        chart.applyOptions({{width: document.getElementById('wti_chart').clientWidth}});
-      }}).observe(document.getElementById('wti_chart'));
+      chart.timeScale().fitContent();
     }})();
   </script>
 </div>"""
@@ -263,7 +257,7 @@ def generate_html(market_data, wti_data, news_items, today_str):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>株式ブリーフィング {today_str}</title>
-<script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ background: #11111b; color: #cdd6f4; font-family: -apple-system, sans-serif; padding: 12px; }}

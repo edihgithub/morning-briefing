@@ -1,6 +1,7 @@
 import yfinance as yf
 import smtplib
 import os
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -17,10 +18,9 @@ TICKERS = {
 WTI_TICKER = "CL=F"
 
 
-def get_market_data(symbol):
+def get_market_data(symbol, days=60):
     ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="10d")
-    # NaN行を除去してから最新2行を使う
+    hist = ticker.history(period=f"{days}d")
     hist = hist.dropna(subset=["Open", "High", "Low", "Close"])
     if len(hist) < 2:
         return None
@@ -35,11 +35,23 @@ def get_market_data(symbol):
     candle = "陽線" if c > o else "陰線"
     movement = describe_movement(o, h, l, c, prev_c)
 
+    # チャート用OHLC履歴（直近30日分）
+    chart_data = []
+    for dt, row in hist.tail(30).iterrows():
+        chart_data.append({
+            "time": dt.strftime("%Y-%m-%d"),
+            "open": round(row["Open"], 2),
+            "high": round(row["High"], 2),
+            "low": round(row["Low"], 2),
+            "close": round(row["Close"], 2),
+        })
+
     return {
         "open": o, "high": h, "low": l, "close": c,
         "change": change, "change_pct": change_pct,
         "candle": candle, "movement": movement,
         "date": hist.index[-1].strftime("%Y-%m-%d"),
+        "chart_data": chart_data,
     }
 
 
@@ -52,7 +64,6 @@ def describe_movement(o, h, l, c, prev_c):
     gap_down = o < prev_c * 0.997
 
     parts = []
-
     if gap_up:
         parts.append("ギャップアップで寄り付き")
     elif gap_down:
@@ -82,7 +93,7 @@ def translate_to_japanese(text):
     try:
         return GoogleTranslator(source="auto", target="ja").translate(text)
     except Exception:
-        return text  # 翻訳失敗時は原文を返す
+        return text
 
 
 def get_news():
@@ -92,17 +103,19 @@ def get_news():
     for item in news_items[:5]:
         content = item.get("content", {})
         title = content.get("title") or item.get("title", "")
+        url = (content.get("canonicalUrl", {}) or {}).get("url") or item.get("link", "")
         if title:
             translated = translate_to_japanese(title)
-            results.append(translated)
+            results.append({"title": translated, "url": url})
     return results
 
 
-def build_email_body(market_data, wti_data, news_titles, today_str):
+def build_email_body(market_data, wti_data, news_items, today_str, pages_url):
     sign = lambda x: f"+{x:.2f}" if x >= 0 else f"{x:.2f}"
 
     lines = [
         f"【朝の株式マーケットブリーフィング】{today_str}",
+        f"ビジュアル表示: {pages_url}",
         "",
         "=" * 40,
         "米国株式市場（前日終値）",
@@ -132,9 +145,11 @@ def build_email_body(market_data, wti_data, news_titles, today_str):
         lines.append("  データ取得失敗")
 
     lines += ["", "=" * 40, "市場関連ニュース（上位5件）", "=" * 40]
-    if news_titles:
-        for i, title in enumerate(news_titles, 1):
-            lines.append(f"  {i}. {title}")
+    if news_items:
+        for i, item in enumerate(news_items, 1):
+            lines.append(f"\n  {i}. {item['title']}")
+            if item["url"]:
+                lines.append(f"     {item['url']}")
     else:
         lines.append("  ニュース取得失敗")
 
@@ -143,13 +158,147 @@ def build_email_body(market_data, wti_data, news_titles, today_str):
         "=" * 40,
         "本日の注目予定",
         "=" * 40,
-        "  経済指標カレンダーは以下でご確認ください：",
         "  https://jp.investing.com/economic-calendar/",
         "",
         "-" * 40,
         "このメールはGitHub Actionsにより自動送信されました。",
     ]
     return "\n".join(lines)
+
+
+def generate_html(market_data, wti_data, news_items, today_str):
+    sign = lambda x: (f"+{x:.2f}" if x >= 0 else f"{x:.2f}")
+    color = lambda x: "#26a69a" if x >= 0 else "#ef5350"
+
+    def card(name, data):
+        if data is None:
+            return f'<div class="card"><h2>{name}</h2><p>データ取得失敗</p></div>'
+        c = color(data["change_pct"])
+        chart_json = json.dumps(data["chart_data"])
+        chart_id = name.replace(" ", "_").replace("&", "")
+        return f"""
+<div class="card">
+  <h2>{name}</h2>
+  <div class="price">{data['close']:,.2f}
+    <span class="change" style="color:{c}">{sign(data['change'])} ({sign(data['change_pct'])}%)</span>
+  </div>
+  <div class="meta">
+    <span class="tag" style="background:{c}">{data['candle']}</span>
+    {data['movement']}
+  </div>
+  <div class="ohlc">始値 {data['open']:,.2f} ／ 高値 {data['high']:,.2f} ／ 安値 {data['low']:,.2f}</div>
+  <div id="{chart_id}" class="chart"></div>
+  <script>
+    (function(){{
+      var chart = LightweightCharts.createChart(document.getElementById('{chart_id}'), {{
+        width: 0, height: 200,
+        layout: {{ background: {{ color: '#1e1e2e' }}, textColor: '#cdd6f4' }},
+        grid: {{ vertLines: {{ color: '#313244' }}, horzLines: {{ color: '#313244' }} }},
+        timeScale: {{ borderColor: '#45475a' }},
+      }});
+      chart.timeScale().fitContent();
+      var series = chart.addCandlestickSeries({{
+        upColor:'#26a69a', downColor:'#ef5350',
+        borderUpColor:'#26a69a', borderDownColor:'#ef5350',
+        wickUpColor:'#26a69a', wickDownColor:'#ef5350',
+      }});
+      series.setData({chart_json});
+      new ResizeObserver(function(){{
+        chart.applyOptions({{width: document.getElementById('{chart_id}').clientWidth}});
+      }}).observe(document.getElementById('{chart_id}'));
+    }})();
+  </script>
+</div>"""
+
+    wti_card = ""
+    if wti_data:
+        c = color(wti_data["change_pct"])
+        chart_json = json.dumps(wti_data["chart_data"])
+        wti_card = f"""
+<div class="card">
+  <h2>WTI原油（USOIL）</h2>
+  <div class="price">{wti_data['close']:.2f} USD
+    <span class="change" style="color:{c}">{sign(wti_data['change'])} ({sign(wti_data['change_pct'])}%)</span>
+  </div>
+  <div class="meta">
+    <span class="tag" style="background:{c}">{wti_data['candle']}</span>
+    {wti_data['movement']}
+  </div>
+  <div class="ohlc">始値 {wti_data['open']:.2f} ／ 高値 {wti_data['high']:.2f} ／ 安値 {wti_data['low']:.2f}</div>
+  <div id="wti_chart" class="chart"></div>
+  <script>
+    (function(){{
+      var chart = LightweightCharts.createChart(document.getElementById('wti_chart'), {{
+        width: 0, height: 200,
+        layout: {{ background: {{ color: '#1e1e2e' }}, textColor: '#cdd6f4' }},
+        grid: {{ vertLines: {{ color: '#313244' }}, horzLines: {{ color: '#313244' }} }},
+        timeScale: {{ borderColor: '#45475a' }},
+      }});
+      chart.timeScale().fitContent();
+      var series = chart.addCandlestickSeries({{
+        upColor:'#26a69a', downColor:'#ef5350',
+        borderUpColor:'#26a69a', borderDownColor:'#ef5350',
+        wickUpColor:'#26a69a', wickDownColor:'#ef5350',
+      }});
+      series.setData({chart_json});
+      new ResizeObserver(function(){{
+        chart.applyOptions({{width: document.getElementById('wti_chart').clientWidth}});
+      }}).observe(document.getElementById('wti_chart'));
+    }})();
+  </script>
+</div>"""
+
+    news_html = ""
+    for i, item in enumerate(news_items, 1):
+        if item["url"]:
+            news_html += f'<li><a href="{item["url"]}" target="_blank">{item["title"]}</a></li>\n'
+        else:
+            news_html += f'<li>{item["title"]}</li>\n'
+
+    market_cards = "".join(card(name, data) for name, data in market_data.items())
+
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>株式ブリーフィング {today_str}</title>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ background: #11111b; color: #cdd6f4; font-family: -apple-system, sans-serif; padding: 12px; }}
+h1 {{ font-size: 1.1rem; color: #89b4fa; margin-bottom: 4px; }}
+.date {{ font-size: 0.85rem; color: #6c7086; margin-bottom: 16px; }}
+.card {{ background: #1e1e2e; border-radius: 12px; padding: 16px; margin-bottom: 12px; }}
+h2 {{ font-size: 1rem; color: #89dceb; margin-bottom: 8px; }}
+.price {{ font-size: 1.6rem; font-weight: bold; }}
+.change {{ font-size: 1rem; font-weight: normal; margin-left: 8px; }}
+.meta {{ margin: 8px 0; font-size: 0.85rem; color: #a6adc8; }}
+.tag {{ color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-right: 6px; }}
+.ohlc {{ font-size: 0.78rem; color: #6c7086; margin-bottom: 8px; }}
+.chart {{ width: 100%; margin-top: 8px; }}
+.news {{ background: #1e1e2e; border-radius: 12px; padding: 16px; margin-bottom: 12px; }}
+.news h2 {{ color: #89dceb; margin-bottom: 10px; }}
+.news li {{ font-size: 0.88rem; margin-bottom: 10px; line-height: 1.5; list-style: none; padding-left: 1em; text-indent: -1em; }}
+.news a {{ color: #89b4fa; text-decoration: none; }}
+.footer {{ font-size: 0.75rem; color: #45475a; text-align: center; margin-top: 8px; }}
+</style>
+</head>
+<body>
+<h1>朝の株式ブリーフィング</h1>
+<div class="date">{today_str} 更新</div>
+
+{market_cards}
+{wti_card}
+
+<div class="news">
+  <h2>市場関連ニュース</h2>
+  <ul>{news_html}</ul>
+</div>
+
+<div class="footer">GitHub Actions により自動生成</div>
+</body>
+</html>"""
 
 
 def send_email(subject, body):
@@ -174,12 +323,21 @@ def send_email(subject, body):
 
 def main():
     today_str = datetime.now(JST).strftime("%Y年%m月%d日")
+    github_user = os.environ.get("GITHUB_USER", "")
+    github_repo = os.environ.get("GITHUB_REPO", "morning-briefing")
+    pages_url = f"https://{github_user}.github.io/{github_repo}/" if github_user else ""
 
     market_data = {name: get_market_data(sym) for name, sym in TICKERS.items()}
     wti_data = get_market_data(WTI_TICKER)
-    news_titles = get_news()
+    news_items = get_news()
 
-    body = build_email_body(market_data, wti_data, news_titles, today_str)
+    # HTMLファイル生成
+    html = generate_html(market_data, wti_data, news_items, today_str)
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print("index.html を生成しました")
+
+    body = build_email_body(market_data, wti_data, news_items, today_str, pages_url)
     subject = f"【朝の株式ブリーフィング】{today_str}"
 
     print(body)

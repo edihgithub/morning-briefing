@@ -6,6 +6,11 @@ on:
     - cron: "0 22 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   send-briefing:
     runs-on: ubuntu-latest
@@ -20,11 +25,21 @@ jobs:
       - name: 依存パッケージインストール
         run: pip install -r requirements.txt
 
-      - name: ブリーフィング送信
+      - name: ブリーフィング送信 & HTML生成
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          GITHUB_USER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
         run: python morning_briefing.py
+
+      - name: GitHub Pages に index.html をプッシュ
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Update briefing $(date +'%Y-%m-%d')" || echo "変更なし"
+          git push

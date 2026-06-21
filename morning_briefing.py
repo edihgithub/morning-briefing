@@ -5,6 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import pytz
+from deep_translator import GoogleTranslator
 
 JST = pytz.timezone("Asia/Tokyo")
 
@@ -18,7 +19,9 @@ WTI_TICKER = "CL=F"
 
 def get_market_data(symbol):
     ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="5d")
+    hist = ticker.history(period="10d")
+    # NaN行を除去してから最新2行を使う
+    hist = hist.dropna(subset=["Open", "High", "Low", "Close"])
     if len(hist) < 2:
         return None
 
@@ -75,6 +78,13 @@ def describe_movement(o, h, l, c, prev_c):
     return "、".join(parts)
 
 
+def translate_to_japanese(text):
+    try:
+        return GoogleTranslator(source="auto", target="ja").translate(text)
+    except Exception:
+        return text  # 翻訳失敗時は原文を返す
+
+
 def get_news():
     ticker = yf.Ticker("^GSPC")
     news_items = ticker.news or []
@@ -83,7 +93,8 @@ def get_news():
         content = item.get("content", {})
         title = content.get("title") or item.get("title", "")
         if title:
-            results.append(title)
+            translated = translate_to_japanese(title)
+            results.append(translated)
     return results
 
 
